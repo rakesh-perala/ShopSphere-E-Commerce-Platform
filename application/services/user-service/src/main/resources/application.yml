@@ -3,14 +3,14 @@ spring:
     name: user-service
 
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/shopsphere}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:shopsphere_user}
     username: ${DB_USERNAME:shopsphere}
     password: ${DB_PASSWORD:shopsphere}
 
   jpa:
     hibernate:
       ddl-auto: update
-    show-sql: true
+    show-sql: false
     properties:
       hibernate:
         format_sql: true
