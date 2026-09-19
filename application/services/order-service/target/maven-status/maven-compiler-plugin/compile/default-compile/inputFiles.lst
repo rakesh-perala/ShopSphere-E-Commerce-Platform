@@ -1,0 +1,6 @@
+/home/repsoft/PROJECT/ShopSphere-E-Commerce-Platform/application/services/order-service/src/main/java/com/shopsphere/orderservice/OrderServiceApplication.java
+/home/repsoft/PROJECT/ShopSphere-E-Commerce-Platform/application/services/order-service/src/main/java/com/shopsphere/orderservice/controller/OrderController.java
+/home/repsoft/PROJECT/ShopSphere-E-Commerce-Platform/application/services/order-service/src/main/java/com/shopsphere/orderservice/entity/Order.java
+/home/repsoft/PROJECT/ShopSphere-E-Commerce-Platform/application/services/order-service/src/main/java/com/shopsphere/orderservice/exception/GlobalExceptionHandler.java
+/home/repsoft/PROJECT/ShopSphere-E-Commerce-Platform/application/services/order-service/src/main/java/com/shopsphere/orderservice/repository/OrderRepository.java
+/home/repsoft/PROJECT/ShopSphere-E-Commerce-Platform/application/services/order-service/src/main/java/com/shopsphere/orderservice/service/OrderService.java
