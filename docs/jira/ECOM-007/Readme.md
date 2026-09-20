@@ -1,4 +1,4 @@
-# ECOM-007 — Docker Bible
+# ECOM-007 — Docker 
 
 # ShopSphere Enterprise E-Commerce Platform
 
