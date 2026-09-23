@@ -1,5 +1,3 @@
-Jenkins ci pipeline
-
 pipeline {
 
     agent any
