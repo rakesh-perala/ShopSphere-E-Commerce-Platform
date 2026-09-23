@@ -1,9 +1,15 @@
-FROM eclipse-temurin:17-jre
+FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 
+RUN useradd --system --create-home --shell /usr/sbin/nologin appuser
+
 COPY target/*.jar app.jar
 
-EXPOSE 8081
+RUN chown -R appuser:appuser /app
+
+USER appuser
+
+EXPOSE 8080
 
 ENTRYPOINT ["java", "-jar", "app.jar"]
