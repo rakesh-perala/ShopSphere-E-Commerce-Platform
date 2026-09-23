@@ -1,0 +1,280 @@
+pipeline {
+
+    agent any
+
+    tools {
+        jdk 'jdk17'
+        maven 'maven3'
+    }
+
+    options {
+        disableConcurrentBuilds()
+        timestamps()
+
+        buildDiscarder(
+            logRotator(
+                numToKeepStr: '20'
+            )
+        )
+    }
+
+    environment {
+
+        SERVICE_NAME = 'user-service'
+
+        SERVICE_DIR = 'application/services/user-service'
+
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+
+    stages {
+
+        /*
+         * ============================================================
+         * 1. Git Checkout
+         * ============================================================
+         */
+
+        stage('Git Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        /*
+         * ============================================================
+         * 2. Resolve Application Version
+         * ============================================================
+         */
+
+        stage('Resolve Application Version') {
+            steps {
+
+                dir("${SERVICE_DIR}") {
+
+                    script {
+
+                        env.APP_VERSION = sh(
+                            script: '''
+                                mvn help:evaluate \
+                                  -Dexpression=project.version \
+                                  -q \
+                                  -DforceStdout
+                            ''',
+                            returnStdout: true
+                        ).trim()
+
+                        echo "Service            : ${SERVICE_NAME}"
+                        echo "Application Version: ${APP_VERSION}"
+                    }
+                }
+            }
+        }
+
+        /*
+         * ============================================================
+         * 3. Maven Build & Test
+         * ============================================================
+         */
+
+        stage('Maven Build & Test') {
+            steps {
+
+                dir("${SERVICE_DIR}") {
+
+                    sh '''
+                        set -e
+
+                        echo "========================================="
+                        echo "Java Version"
+                        echo "========================================="
+                        java -version
+
+                        echo "========================================="
+                        echo "Maven Version"
+                        echo "========================================="
+                        mvn -version
+
+                        echo "========================================="
+                        echo "Maven Clean Package"
+                        echo "========================================="
+
+                        mvn clean package -DskipTests=false
+
+                        echo "========================================="
+                        echo "Build Artifacts"
+                        echo "========================================="
+
+                        ls -lh target/
+
+                        echo "========================================="
+                        echo "JAR Verification"
+                        echo "========================================="
+
+                        find target \
+                          -maxdepth 1 \
+                          -type f \
+                          -name "*.jar" \
+                          ! -name "*.jar.original" \
+                          -print
+                    '''
+                }
+            }
+
+            post {
+                always {
+
+                    junit(
+                        testResults: '**/target/surefire-reports/*.xml',
+                        allowEmptyResults: true
+                    )
+                }
+            }
+        }
+
+        /*
+         * ============================================================
+         * 4. SonarQube Analysis
+         * ============================================================
+         */
+
+        stage('SonarQube Analysis') {
+            steps {
+
+                dir("${SERVICE_DIR}") {
+
+                    withSonarQubeEnv('SonarQube') {
+
+                        sh '''
+                            ${SCANNER_HOME}/bin/sonar-scanner \
+                              -Dsonar.projectName=shopsphere-user-service \
+                              -Dsonar.projectKey=shopsphere-user-service \
+                              -Dsonar.sources=src/main/java \
+                              -Dsonar.java.binaries=target/classes
+                        '''
+                    }
+                }
+            }
+        }
+
+        /*
+         * ============================================================
+         * 5. SonarQube Quality Gate
+         * ============================================================
+         */
+
+        stage('SonarQube Quality Gate') {
+
+            steps {
+
+                timeout(time: 5, unit: 'MINUTES') {
+
+                    waitForQualityGate(
+                        abortPipeline: true
+                    )
+                }
+            }
+        }
+
+        /*
+         * ============================================================
+         * 6. Trivy Filesystem Security Scan
+         * ============================================================
+         */
+
+        stage('Trivy Filesystem Scan') {
+
+            steps {
+
+                dir("${SERVICE_DIR}") {
+
+                    sh '''
+                        trivy fs \
+                          --scanners vuln,secret,misconfig \
+                          --severity HIGH,CRITICAL \
+                          --exit-code 1 \
+                          --no-progress \
+                          .
+                    '''
+                }
+            }
+        }
+
+        /*
+         * ============================================================
+         * 7. Identify Build Artifact
+         * ============================================================
+         */
+
+        stage('Identify Build Artifact') {
+
+            steps {
+
+                dir("${SERVICE_DIR}") {
+
+                    script {
+
+                        env.JAR_FILE = sh(
+                            script: '''
+                                set -e
+
+                                JAR_FILE=$(find target \
+                                  -maxdepth 1 \
+                                  -type f \
+                                  -name "*.jar" \
+                                  ! -name "*.jar.original" \
+                                  -print -quit)
+
+                                if [ -z "$JAR_FILE" ]; then
+                                    echo "ERROR: No executable JAR found."
+                                    echo "Contents of target directory:"
+                                    ls -lah target/
+                                    exit 1
+                                fi
+
+                                echo "$JAR_FILE"
+                            ''',
+                            returnStdout: true
+                        ).trim()
+
+                        if (!env.JAR_FILE) {
+                            error "JAR artifact not found"
+                        }
+
+                        echo "========================================="
+                        echo "Build Artifact Identified"
+                        echo "========================================="
+                        echo "JAR_FILE: ${env.JAR_FILE}"
+                    }
+                }
+            }
+        }
+    }
+
+    /*
+     * ================================================================
+     * Pipeline Post Actions
+     * ================================================================
+     */
+
+    post {
+
+        success {
+
+            echo "ShopSphere ${SERVICE_NAME} CI pipeline completed successfully."
+        }
+
+        failure {
+
+            echo "ShopSphere ${SERVICE_NAME} CI pipeline failed."
+        }
+
+        always {
+
+            archiveArtifacts(
+                artifacts: "${SERVICE_DIR}/target/*.jar",
+                allowEmptyArchive: true
+            )
+        }
+    }
+}
