@@ -1,3 +1,4 @@
+Jenkins ci pipeline
 
 pipeline {
 
@@ -24,8 +25,6 @@ pipeline {
         SERVICE_NAME = 'user-service'
 
         SERVICE_DIR = 'application/services/user-service'
-
-        DOCKER_IMAGE = 'dockerperala/shopsphere-user-service'
 
         SCANNER_HOME = tool 'sonar-scanner'
     }
@@ -252,125 +251,6 @@ pipeline {
                 }
             }
         }
-
-        /*
-         * ============================================================
-         * 8. Upload to Nexus
-         * ============================================================
-         */
-
-        stage('Upload to Nexus') {
-
-            when {
-
-                expression {
-                    return env.BRANCH_NAME?.startsWith('release/')
-                }
-            }
-
-            steps {
-
-                echo "Nexus upload will be configured for release builds."
-            }
-        }
-
-        /*
-         * ============================================================
-         * 9. Docker Build
-         * ============================================================
-         */
-
-        stage('Docker Build') {
-
-            when {
-
-                expression {
-                    return env.BRANCH_NAME?.startsWith('release/')
-                }
-            }
-
-            steps {
-
-                dir("${SERVICE_DIR}") {
-
-                    sh '''
-                        docker build \
-                          -t ${DOCKER_IMAGE}:${APP_VERSION} \
-                          .
-                    '''
-                }
-            }
-        }
-
-        /*
-         * ============================================================
-         * 10. Trivy Docker Image Scan
-         * ============================================================
-         */
-
-        stage('Trivy Docker Image Scan') {
-
-            when {
-
-                expression {
-                    return env.BRANCH_NAME?.startsWith('release/')
-                }
-            }
-
-            steps {
-
-                sh '''
-                    trivy image \
-                      --severity HIGH,CRITICAL \
-                      --no-progress \
-                      ${DOCKER_IMAGE}:${APP_VERSION}
-                '''
-            }
-        }
-
-        /*
-         * ============================================================
-         * 11. Docker Hub Push
-         * ============================================================
-         */
-
-        stage('Docker Hub Push') {
-
-            when {
-
-                expression {
-                    return env.BRANCH_NAME?.startsWith('release/')
-                }
-            }
-
-            steps {
-
-                withCredentials([
-
-                    usernamePassword(
-                        credentialsId: 'docker-cred',
-                        usernameVariable: 'DOCKER_USERNAME',
-                        passwordVariable: 'DOCKER_PASSWORD'
-                    )
-
-                ]) {
-
-                    sh '''
-                        set -e
-
-                        echo "$DOCKER_PASSWORD" | \
-                          docker login \
-                          -u "$DOCKER_USERNAME" \
-                          --password-stdin
-
-                        docker push \
-                          ${DOCKER_IMAGE}:${APP_VERSION}
-
-                        docker logout
-                    '''
-                }
-            }
-        }
     }
 
     /*
@@ -400,4 +280,3 @@ pipeline {
         }
     }
 }
-
