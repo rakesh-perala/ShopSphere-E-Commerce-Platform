@@ -1,3 +1,4 @@
+
 pipeline {
 
     agent any
@@ -31,14 +32,27 @@ pipeline {
 
     stages {
 
+        /*
+         * ============================================================
+         * 1. Git Checkout
+         * ============================================================
+         */
+
         stage('Git Checkout') {
             steps {
                 checkout scm
             }
         }
 
+        /*
+         * ============================================================
+         * 2. Resolve Application Version
+         * ============================================================
+         */
+
         stage('Resolve Application Version') {
             steps {
+
                 dir("${SERVICE_DIR}") {
 
                     script {
@@ -53,25 +67,66 @@ pipeline {
                             returnStdout: true
                         ).trim()
 
-                        echo "Service       : ${SERVICE_NAME}"
-                        echo "Application Version : ${APP_VERSION}"
+                        echo "Service            : ${SERVICE_NAME}"
+                        echo "Application Version: ${APP_VERSION}"
                     }
                 }
             }
         }
 
+        /*
+         * ============================================================
+         * 3. Maven Build & Test
+         * ============================================================
+         */
+
         stage('Maven Build & Test') {
             steps {
+
                 dir("${SERVICE_DIR}") {
 
                     sh '''
-                        mvn clean test
+                        set -e
+
+                        echo "========================================="
+                        echo "Java Version"
+                        echo "========================================="
+                        java -version
+
+                        echo "========================================="
+                        echo "Maven Version"
+                        echo "========================================="
+                        mvn -version
+
+                        echo "========================================="
+                        echo "Maven Clean Package"
+                        echo "========================================="
+
+                        mvn clean package -DskipTests=false
+
+                        echo "========================================="
+                        echo "Build Artifacts"
+                        echo "========================================="
+
+                        ls -lh target/
+
+                        echo "========================================="
+                        echo "JAR Verification"
+                        echo "========================================="
+
+                        find target \
+                          -maxdepth 1 \
+                          -type f \
+                          -name "*.jar" \
+                          ! -name "*.jar.original" \
+                          -print
                     '''
                 }
             }
 
             post {
                 always {
+
                     junit(
                         testResults: '**/target/surefire-reports/*.xml',
                         allowEmptyResults: true
@@ -79,6 +134,12 @@ pipeline {
                 }
             }
         }
+
+        /*
+         * ============================================================
+         * 4. SonarQube Analysis
+         * ============================================================
+         */
 
         stage('SonarQube Analysis') {
             steps {
@@ -99,6 +160,12 @@ pipeline {
             }
         }
 
+        /*
+         * ============================================================
+         * 5. SonarQube Quality Gate
+         * ============================================================
+         */
+
         stage('SonarQube Quality Gate') {
 
             steps {
@@ -111,6 +178,12 @@ pipeline {
                 }
             }
         }
+
+        /*
+         * ============================================================
+         * 6. Trivy Filesystem Security Scan
+         * ============================================================
+         */
 
         stage('Trivy Filesystem Scan') {
 
@@ -130,6 +203,12 @@ pipeline {
             }
         }
 
+        /*
+         * ============================================================
+         * 7. Identify Build Artifact
+         * ============================================================
+         */
+
         stage('Identify Build Artifact') {
 
             steps {
@@ -140,12 +219,23 @@ pipeline {
 
                         env.JAR_FILE = sh(
                             script: '''
-                                find target \
+                                set -e
+
+                                JAR_FILE=$(find target \
                                   -maxdepth 1 \
                                   -type f \
                                   -name "*.jar" \
                                   ! -name "*.jar.original" \
-                                  | head -n 1
+                                  -print -quit)
+
+                                if [ -z "$JAR_FILE" ]; then
+                                    echo "ERROR: No executable JAR found."
+                                    echo "Contents of target directory:"
+                                    ls -lah target/
+                                    exit 1
+                                fi
+
+                                echo "$JAR_FILE"
                             ''',
                             returnStdout: true
                         ).trim()
@@ -154,15 +244,25 @@ pipeline {
                             error "JAR artifact not found"
                         }
 
-                        echo "Build artifact: ${env.JAR_FILE}"
+                        echo "========================================="
+                        echo "Build Artifact Identified"
+                        echo "========================================="
+                        echo "JAR_FILE: ${env.JAR_FILE}"
                     }
                 }
             }
         }
 
+        /*
+         * ============================================================
+         * 8. Upload to Nexus
+         * ============================================================
+         */
+
         stage('Upload to Nexus') {
 
             when {
+
                 expression {
                     return env.BRANCH_NAME?.startsWith('release/')
                 }
@@ -174,9 +274,16 @@ pipeline {
             }
         }
 
+        /*
+         * ============================================================
+         * 9. Docker Build
+         * ============================================================
+         */
+
         stage('Docker Build') {
 
             when {
+
                 expression {
                     return env.BRANCH_NAME?.startsWith('release/')
                 }
@@ -195,9 +302,16 @@ pipeline {
             }
         }
 
+        /*
+         * ============================================================
+         * 10. Trivy Docker Image Scan
+         * ============================================================
+         */
+
         stage('Trivy Docker Image Scan') {
 
             when {
+
                 expression {
                     return env.BRANCH_NAME?.startsWith('release/')
                 }
@@ -214,9 +328,16 @@ pipeline {
             }
         }
 
+        /*
+         * ============================================================
+         * 11. Docker Hub Push
+         * ============================================================
+         */
+
         stage('Docker Hub Push') {
 
             when {
+
                 expression {
                     return env.BRANCH_NAME?.startsWith('release/')
                 }
@@ -225,14 +346,18 @@ pipeline {
             steps {
 
                 withCredentials([
+
                     usernamePassword(
                         credentialsId: 'docker-cred',
                         usernameVariable: 'DOCKER_USERNAME',
                         passwordVariable: 'DOCKER_PASSWORD'
                     )
+
                 ]) {
 
                     sh '''
+                        set -e
+
                         echo "$DOCKER_PASSWORD" | \
                           docker login \
                           -u "$DOCKER_USERNAME" \
@@ -248,17 +373,26 @@ pipeline {
         }
     }
 
+    /*
+     * ================================================================
+     * Pipeline Post Actions
+     * ================================================================
+     */
+
     post {
 
         success {
+
             echo "ShopSphere ${SERVICE_NAME} CI pipeline completed successfully."
         }
 
         failure {
+
             echo "ShopSphere ${SERVICE_NAME} CI pipeline failed."
         }
 
         always {
+
             archiveArtifacts(
                 artifacts: "${SERVICE_DIR}/target/*.jar",
                 allowEmptyArchive: true
@@ -266,3 +400,4 @@ pipeline {
         }
     }
 }
+
