@@ -337,44 +337,39 @@ PY
 
         stage('Prepare Docker Build Context') {
 
-            steps {
+    steps {
 
-                sh '''
-                    set -e
+        sh '''
+            set -e
 
-                    echo "============================================"
-                    echo "Preparing Docker Build Context"
-                    echo "============================================"
+            echo "============================================"
+            echo "Preparing Docker Build Context"
+            echo "============================================"
 
-                    rm -rf "${SERVICE_DIR}/target"
+            rm -rf "${SERVICE_DIR}/target"
 
-                    mkdir -p "${SERVICE_DIR}/target"
+            mkdir -p "${SERVICE_DIR}/target"
 
+            # IMPORTANT:
+            #
+            # The JAR was downloaded from Nexus.
+            #
+            # We are NOT running Maven.
+            #
+            # We are NOT compiling source code.
+            #
+            # We are NOT running tests again.
 
-                    /*
-                     * IMPORTANT:
-                     *
-                     * The JAR was downloaded from Nexus.
-                     *
-                     * We are NOT running Maven.
-                     *
-                     * We are NOT compiling source code.
-                     *
-                     * We are NOT running tests again.
-                     */
+            cp \
+                release-artifact/user-service.jar \
+                "${SERVICE_DIR}/target/user-service.jar"
 
-                    cp \
-                        release-artifact/user-service.jar \
-                        "${SERVICE_DIR}/target/user-service.jar"
-
-
-                    echo
-                    echo "Docker Build Context:"
-                    ls -lh "${SERVICE_DIR}/target/user-service.jar"
-                '''
-            }
-        }
-
+            echo
+            echo "Docker Build Context:"
+            ls -lh "${SERVICE_DIR}/target/user-service.jar"
+        '''
+    }
+}
 
         // ============================================================
         // 6. Docker Build
