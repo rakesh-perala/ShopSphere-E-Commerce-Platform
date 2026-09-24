@@ -1,0 +1,15 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
+# Terraform backup configuration files
+*.tf.backup
+
+# Local environment files
+.env
+.env.*
+!.env.example
