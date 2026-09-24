@@ -1,5 +1,5 @@
-
 <?xml version="1.0" encoding="UTF-8"?>
+
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
@@ -20,6 +20,13 @@
 
     <name>user-service</name>
     <description>ShopSphere User Service</description>
+
+    <distributionManagement>
+        <snapshotRepository>
+            <id>shopshare</id>
+            <url>http://15.252.164.74:8081/repository/shopshare/</url>
+        </snapshotRepository>
+    </distributionManagement>
 
     <properties>
         <java.version>17</java.version>
@@ -80,4 +87,3 @@
     </build>
 
 </project>
-

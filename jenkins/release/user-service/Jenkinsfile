@@ -2,8 +2,25 @@ pipeline {
 
     agent any
 
+    parameters {
+
+        string(
+            name: 'RELEASE_VERSION',
+            defaultValue: '1.0.0',
+            description: 'Immutable Docker release version. Format: MAJOR.MINOR.PATCH'
+        )
+
+        string(
+            name: 'NEXUS_SNAPSHOT_VERSION',
+            defaultValue: '0.0.1-SNAPSHOT',
+            description: 'Validated Nexus snapshot version published by CI'
+        )
+    }
+
     options {
+
         disableConcurrentBuilds()
+
         timestamps()
 
         buildDiscarder(
@@ -13,44 +30,32 @@ pipeline {
         )
     }
 
-    parameters {
-
-        string(
-            name: 'CI_BUILD_NUMBER',
-            defaultValue: '',
-            description: 'Successful CI build number to promote'
-        )
-
-        string(
-            name: 'RELEASE_VERSION',
-            defaultValue: '',
-            description: 'Release version in MAJOR.MINOR.PATCH format, for example 1.0.0'
-        )
-
-        choice(
-            name: 'RELEASE_APPROVAL',
-            choices: [
-                'ABORT',
-                'PROCEED'
-            ],
-            description: 'Explicit release approval'
-        )
-    }
-
     environment {
 
         SERVICE_NAME = 'user-service'
 
         SERVICE_DIR = 'application/services/user-service'
 
-        CI_JOB_NAME = 'ShopSphere-User-Service-CI'
+        NEXUS_REPOSITORY = 'shopshare'
 
-        AWS_REGION = 'ap-south-1'
+        NEXUS_URL = 'http://15.252.164.74:8081'
+
+        NEXUS_GROUP_ID = 'com.shopsphere'
+
+        NEXUS_ARTIFACT_ID = 'user-service'
+
+        DOCKER_IMAGE = 'dockerperala/shopsphere-user-service'
+
+        DOCKER_CREDENTIALS_ID = 'docker-cred'
 
         DOCKER_BUILDKIT = '1'
     }
 
     stages {
+
+        // ============================================================
+        // 1. Validate Release Parameters
+        // ============================================================
 
         stage('Validate Release Parameters') {
 
@@ -58,74 +63,573 @@ pipeline {
 
                 script {
 
-                    if (!params.CI_BUILD_NUMBER?.trim()) {
-                        error 'CI_BUILD_NUMBER is required.'
+                    if (!(params.RELEASE_VERSION ==~ /^\d+\.\d+\.\d+$/)) {
+
+                        error(
+                            "Invalid RELEASE_VERSION: ${params.RELEASE_VERSION}. " +
+                            "Expected format: MAJOR.MINOR.PATCH"
+                        )
                     }
 
-                    if (!(params.CI_BUILD_NUMBER ==~ /^[0-9]+$/)) {
-                        error 'CI_BUILD_NUMBER must contain only numbers.'
+                    if (!(params.NEXUS_SNAPSHOT_VERSION ==~ /^\d+\.\d+\.\d+-SNAPSHOT$/)) {
+
+                        error(
+                            "Invalid NEXUS_SNAPSHOT_VERSION: ${params.NEXUS_SNAPSHOT_VERSION}. " +
+                            "Expected format: MAJOR.MINOR.PATCH-SNAPSHOT"
+                        )
                     }
 
-                    if (!params.RELEASE_VERSION?.trim()) {
-                        error 'RELEASE_VERSION is required.'
-                    }
-
-                    if (!(params.RELEASE_VERSION ==~ /^[0-9]+\.[0-9]+\.[0-9]+$/)) {
-                        error 'RELEASE_VERSION must use MAJOR.MINOR.PATCH format.'
-                    }
-
-                    if (params.RELEASE_APPROVAL != 'PROCEED') {
-                        error 'Release approval was not granted.'
-                    }
-
-                    echo "Service: ${SERVICE_NAME}"
-                    echo "CI Job: ${CI_JOB_NAME}"
-                    echo "CI Build Number: ${params.CI_BUILD_NUMBER}"
-                    echo "Release Version: ${params.RELEASE_VERSION}"
-                    echo "AWS Region: ${AWS_REGION}"
+                    echo "============================================"
+                    echo "Release Parameters"
+                    echo "============================================"
+                    echo "Service              : ${env.SERVICE_NAME}"
+                    echo "Release Version      : ${params.RELEASE_VERSION}"
+                    echo "Nexus Snapshot       : ${params.NEXUS_SNAPSHOT_VERSION}"
+                    echo "Docker Image         : ${env.DOCKER_IMAGE}"
+                    echo "============================================"
                 }
             }
         }
 
-        stage('Release Preparation') {
+
+        // ============================================================
+        // 2. Git Checkout
+        // ============================================================
+
+        stage('Git Checkout') {
+
+            steps {
+
+                checkout scm
+
+                sh '''
+                    set -e
+
+                    echo "============================================"
+                    echo "Git Information"
+                    echo "============================================"
+
+                    echo "Commit:"
+                    git rev-parse HEAD
+
+                    echo
+                    echo "Git Branch:"
+                    git branch --show-current
+
+                    echo
+                    echo "Repository Status:"
+                    git status --short
+                '''
+            }
+        }
+
+
+        // ============================================================
+        // 3. Download Exact Validated Artifact From Nexus
+        // ============================================================
+
+        stage('Download Artifact From Nexus') {
+
+            steps {
+
+                script {
+
+                    /*
+                     * Maven groupId:
+                     *
+                     *     com.shopsphere
+                     *
+                     * Nexus repository path:
+                     *
+                     *     com/shopsphere
+                     *
+                     * This conversion MUST happen in Groovy.
+                     *
+                     * It must NOT be written as:
+                     *
+                     *     ${NEXUS_GROUP_ID.replace('.', '/')}
+                     *
+                     * inside the shell block because that is
+                     * Groovy syntax, not Bash syntax.
+                     */
+
+                    env.NEXUS_GROUP_PATH =
+                        env.NEXUS_GROUP_ID.replace('.', '/')
+
+                    env.NEXUS_METADATA_URL =
+                        "${env.NEXUS_URL}/repository/${env.NEXUS_REPOSITORY}/${env.NEXUS_GROUP_PATH}/${env.NEXUS_ARTIFACT_ID}/${params.NEXUS_SNAPSHOT_VERSION}/maven-metadata.xml"
+
+
+                    // ------------------------------------------------
+                    // Download Maven metadata
+                    // ------------------------------------------------
+
+                    sh '''
+                        set -e
+
+                        rm -rf release-artifact
+
+                        mkdir -p release-artifact
+
+                        echo "============================================"
+                        echo "Downloading Maven Metadata"
+                        echo "============================================"
+
+                        echo "Metadata URL:"
+                        echo "${NEXUS_METADATA_URL}"
+
+                        curl -fsSL \
+                            "${NEXUS_METADATA_URL}" \
+                            -o release-artifact/maven-metadata.xml
+
+                        echo
+                        echo "Nexus Maven Metadata:"
+                        cat release-artifact/maven-metadata.xml
+                    '''
+
+
+                    // ------------------------------------------------
+                    // Resolve exact timestamp/build number
+                    // ------------------------------------------------
+
+                    def metadata = sh(
+                        script: '''
+                            python3 - <<'PY'
+import xml.etree.ElementTree as ET
+
+file = "release-artifact/maven-metadata.xml"
+
+root = ET.parse(file).getroot()
+
+timestamp = root.findtext(
+    "./versioning/snapshot/timestamp"
+)
+
+build_number = root.findtext(
+    "./versioning/snapshot/buildNumber"
+)
+
+if not timestamp or not build_number:
+    raise SystemExit(
+        "Unable to resolve Nexus snapshot timestamp/buildNumber"
+    )
+
+print(f"{timestamp}|{build_number}")
+PY
+                        ''',
+                        returnStdout: true
+                    ).trim()
+
+
+                    def parts = metadata.split('\\|')
+
+
+                    if (parts.size() != 2) {
+
+                        error(
+                            "Invalid Nexus metadata resolution result: ${metadata}"
+                        )
+                    }
+
+
+                    env.NEXUS_TIMESTAMP = parts[0]
+
+                    env.NEXUS_BUILD_NUMBER = parts[1]
+
+
+                    /*
+                     * Example:
+                     *
+                     * Snapshot:
+                     *     0.0.1-SNAPSHOT
+                     *
+                     * Nexus timestamp:
+                     *     20260923.123456
+                     *
+                     * Build number:
+                     *     3
+                     *
+                     * Resolved:
+                     *     0.0.1-20260923.123456-3
+                     */
+
+                    env.NEXUS_RESOLVED_VERSION =
+                        "${params.NEXUS_SNAPSHOT_VERSION.replace('-SNAPSHOT', '')}-${env.NEXUS_TIMESTAMP}-${env.NEXUS_BUILD_NUMBER}"
+
+
+                    echo "============================================"
+                    echo "Nexus Artifact Resolution"
+                    echo "============================================"
+
+                    echo "Snapshot Version : ${params.NEXUS_SNAPSHOT_VERSION}"
+
+                    echo "Timestamp        : ${env.NEXUS_TIMESTAMP}"
+
+                    echo "Build Number     : ${env.NEXUS_BUILD_NUMBER}"
+
+                    echo "Resolved Version : ${env.NEXUS_RESOLVED_VERSION}"
+
+
+                    // ------------------------------------------------
+                    // Download exact immutable JAR
+                    // ------------------------------------------------
+
+                    sh '''
+                        set -e
+
+                        JAR_NAME="${NEXUS_ARTIFACT_ID}-${NEXUS_RESOLVED_VERSION}.jar"
+
+                        ARTIFACT_URL="${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/${NEXUS_GROUP_PATH}/${NEXUS_ARTIFACT_ID}/${NEXUS_SNAPSHOT_VERSION}/${JAR_NAME}"
+
+                        echo
+                        echo "============================================"
+                        echo "Exact Nexus Artifact"
+                        echo "============================================"
+
+                        echo "Artifact URL:"
+                        echo "${ARTIFACT_URL}"
+
+                        curl -fsSL \
+                            "${ARTIFACT_URL}" \
+                            -o release-artifact/user-service.jar
+
+
+                        echo
+                        echo "Downloaded Artifact:"
+                        ls -lh release-artifact/user-service.jar
+
+
+                        echo
+                        echo "SHA256:"
+                        sha256sum release-artifact/user-service.jar
+                    '''
+                }
+            }
+        }
+
+
+        // ============================================================
+        // 4. Release Approval
+        // ============================================================
+
+        stage('Release Approval') {
+
+            steps {
+
+                timeout(
+                    time: 10,
+                    unit: 'MINUTES'
+                ) {
+
+                    input(
+                        message:
+                            "Approve Docker release ${params.RELEASE_VERSION} for ${env.SERVICE_NAME}?",
+                        ok: 'Approve Release'
+                    )
+                }
+            }
+        }
+
+
+        // ============================================================
+        // 5. Prepare Docker Build Context
+        // ============================================================
+
+        stage('Prepare Docker Build Context') {
 
             steps {
 
                 sh '''
                     set -e
 
-                    echo "========================================="
-                    echo "Release Preparation"
-                    echo "========================================="
+                    echo "============================================"
+                    echo "Preparing Docker Build Context"
+                    echo "============================================"
 
-                    echo "Workspace:"
-                    pwd
+                    rm -rf "${SERVICE_DIR}/target"
 
-                    echo "Java Version:"
-                    java -version || true
+                    mkdir -p "${SERVICE_DIR}/target"
 
-                    echo "Docker Version:"
-                    docker --version || true
 
-                    echo "AWS CLI Version:"
-                    aws --version || true
+                    /*
+                     * IMPORTANT:
+                     *
+                     * The JAR was downloaded from Nexus.
+                     *
+                     * We are NOT running Maven.
+                     *
+                     * We are NOT compiling source code.
+                     *
+                     * We are NOT running tests again.
+                     */
 
-                    echo "Release pipeline skeleton validated."
+                    cp \
+                        release-artifact/user-service.jar \
+                        "${SERVICE_DIR}/target/user-service.jar"
+
+
+                    echo
+                    echo "Docker Build Context:"
+                    ls -lh "${SERVICE_DIR}/target/user-service.jar"
                 '''
             }
         }
+
+
+        // ============================================================
+        // 6. Docker Build
+        // ============================================================
+
+        stage('Docker Build') {
+
+            steps {
+
+                dir("${SERVICE_DIR}") {
+
+                    sh '''
+                        set -e
+
+                        echo "============================================"
+                        echo "Building Docker Image"
+                        echo "============================================"
+
+                        echo "Docker Image:"
+                        echo "${DOCKER_IMAGE}:${RELEASE_VERSION}"
+
+                        docker build \
+                            --pull \
+                            -t "${DOCKER_IMAGE}:${RELEASE_VERSION}" \
+                            .
+
+
+                        echo
+                        echo "Docker Image Details:"
+
+                        docker image inspect \
+                            "${DOCKER_IMAGE}:${RELEASE_VERSION}" \
+                            --format='ID={{.Id}} Size={{.Size}} Created={{.Created}}'
+                    '''
+                }
+            }
+        }
+
+
+        // ============================================================
+        // 7. Trivy Image Scan
+        // ============================================================
+
+        stage('Trivy Image Scan') {
+
+            steps {
+
+                sh '''
+                    set -e
+
+                    echo "============================================"
+                    echo "Trivy Docker Image Scan"
+                    echo "============================================"
+
+                    trivy image \
+                        --scanners vuln,secret,misconfig \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 1 \
+                        --no-progress \
+                        "${DOCKER_IMAGE}:${RELEASE_VERSION}"
+                '''
+            }
+        }
+
+
+        // ============================================================
+        // 8. Docker Hub Login
+        // ============================================================
+
+        stage('Docker Hub Login') {
+
+            steps {
+
+                withCredentials(
+                    [
+                        usernamePassword(
+                            credentialsId: "${DOCKER_CREDENTIALS_ID}",
+                            usernameVariable: 'DOCKER_USERNAME',
+                            passwordVariable: 'DOCKER_PASSWORD'
+                        )
+                    ]
+                ) {
+
+                    sh '''
+                        set -e
+
+                        echo "============================================"
+                        echo "Docker Hub Authentication"
+                        echo "============================================"
+
+                        echo "${DOCKER_PASSWORD}" | \
+                            docker login \
+                            --username "${DOCKER_USERNAME}" \
+                            --password-stdin
+                    '''
+                }
+            }
+        }
+
+
+        // ============================================================
+        // 9. Push Immutable Docker Image
+        // ============================================================
+
+        stage('Push Image To Docker Hub') {
+
+            steps {
+
+                sh '''
+                    set -e
+
+                    echo "============================================"
+                    echo "Pushing Docker Image"
+                    echo "============================================"
+
+                    docker push \
+                        "${DOCKER_IMAGE}:${RELEASE_VERSION}"
+
+
+                    echo
+                    echo "Docker Image Successfully Published:"
+                    echo "${DOCKER_IMAGE}:${RELEASE_VERSION}"
+                '''
+            }
+        }
+
+
+        // ============================================================
+        // 10. Generate Release Manifest
+        // ============================================================
+
+        stage('Generate Release Manifest') {
+
+            steps {
+
+                script {
+
+                    def dockerDigest = sh(
+                        script: """
+                            docker image inspect \
+                                "${env.DOCKER_IMAGE}:${params.RELEASE_VERSION}" \
+                                --format='{{index .RepoDigests 0}}'
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+
+                    writeFile(
+                        file: 'release-manifest.txt',
+                        text: """\
+ShopSphere Release Manifest
+===========================
+
+Service                 : ${env.SERVICE_NAME}
+Release Version         : ${params.RELEASE_VERSION}
+
+Nexus Repository        : ${env.NEXUS_REPOSITORY}
+Nexus Snapshot Version  : ${params.NEXUS_SNAPSHOT_VERSION}
+Nexus Resolved Version  : ${env.NEXUS_RESOLVED_VERSION}
+
+Nexus Group ID          : ${env.NEXUS_GROUP_ID}
+Nexus Artifact ID       : ${env.NEXUS_ARTIFACT_ID}
+
+Docker Image            : ${env.DOCKER_IMAGE}:${params.RELEASE_VERSION}
+Docker Digest           : ${dockerDigest}
+
+Git Commit              : ${env.GIT_COMMIT ?: 'N/A'}
+
+Jenkins Build Number    : ${env.BUILD_NUMBER}
+
+Release Timestamp       : ${new Date().format('yyyy-MM-dd HH:mm:ss z')}
+
+Artifact Source         : Nexus
+Build Strategy          : Reuse CI-validated artifact
+
+Maven Build In Release  : NO
+Maven Test In Release   : NO
+SonarQube In Release    : NO
+Quality Gate In Release : NO
+Trivy FS In Release     : NO
+
+Docker Build            : YES
+Trivy Image Scan        : YES
+Docker Hub Push         : YES
+"""
+                    )
+
+
+                    archiveArtifacts(
+                        artifacts: 'release-manifest.txt',
+                        fingerprint: true
+                    )
+
+
+                    echo "============================================"
+                    echo "Release Manifest"
+                    echo "============================================"
+
+                    sh 'cat release-manifest.txt'
+                }
+            }
+        }
     }
+
+
+    // ================================================================
+    // POST ACTIONS
+    // ================================================================
 
     post {
 
         success {
 
-            echo 'ECOM-010 release pipeline skeleton validation completed successfully.'
+            echo """
+============================================================
+ShopSphere Release Pipeline SUCCESS
+============================================================
+
+Service          : ${env.SERVICE_NAME}
+Release Version  : ${params.RELEASE_VERSION}
+
+Docker Image:
+${env.DOCKER_IMAGE}:${params.RELEASE_VERSION}
+
+Artifact Source:
+Nexus
+
+Release completed successfully.
+============================================================
+"""
         }
+
 
         failure {
 
-            echo 'ECOM-010 release pipeline skeleton validation failed.'
+            echo """
+============================================================
+ShopSphere Release Pipeline FAILED
+============================================================
+
+Service          : ${env.SERVICE_NAME}
+Release Version  : ${params.RELEASE_VERSION}
+
+Check the failed stage and Jenkins console output.
+
+============================================================
+"""
+        }
+
+
+        always {
+
+            sh '''
+                rm -rf release-artifact
+            '''
         }
     }
 }
