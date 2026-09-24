@@ -153,9 +153,8 @@ pipeline {
                      * Groovy syntax, not Bash syntax.
                      */
 
-                    env.NEXUS_GROUP_PATH =
-env.NEXUS_SNAPSHOT_VERSION_VALUE = params.NEXUS_SNAPSHOT_VERSION
-                        env.NEXUS_GROUP_ID.replace('.', '/')
+                    env.NEXUS_GROUP_PATH = env.NEXUS_GROUP_ID.replace(".", "/")
+                    env.NEXUS_SNAPSHOT_VERSION_VALUE = params.NEXUS_SNAPSHOT_VERSION
 
                     env.NEXUS_METADATA_URL =
                         "${env.NEXUS_URL}/repository/${env.NEXUS_REPOSITORY}/${env.NEXUS_GROUP_PATH}/${env.NEXUS_ARTIFACT_ID}/${params.NEXUS_SNAPSHOT_VERSION}/maven-metadata.xml"
