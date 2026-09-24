@@ -25,6 +25,16 @@ pipeline {
         SERVICE_DIR = 'application/services/user-service'
 
         SCANNER_HOME = tool 'sonar-scanner'
+
+        NEXUS_URL = 'http://15.252.164.74:8081'
+
+        NEXUS_REPOSITORY = 'shopshare'
+
+        NEXUS_GROUP_ID = 'com.shopsphere'
+
+        NEXUS_ARTIFACT_ID = 'user-service'
+
+        MAVEN_SETTINGS_ID = 'shopsphere-maven-settings'
     }
 
     stages {
@@ -36,7 +46,9 @@ pipeline {
          */
 
         stage('Git Checkout') {
+
             steps {
+
                 checkout scm
             }
         }
@@ -48,6 +60,7 @@ pipeline {
          */
 
         stage('Resolve Application Version') {
+
             steps {
 
                 dir("${SERVICE_DIR}") {
@@ -64,8 +77,12 @@ pipeline {
                             returnStdout: true
                         ).trim()
 
+                        echo "========================================="
+                        echo "Application Version"
+                        echo "========================================="
                         echo "Service            : ${SERVICE_NAME}"
                         echo "Application Version: ${APP_VERSION}"
+                        echo "========================================="
                     }
                 }
             }
@@ -78,6 +95,7 @@ pipeline {
          */
 
         stage('Maven Build & Test') {
+
             steps {
 
                 dir("${SERVICE_DIR}") {
@@ -122,6 +140,7 @@ pipeline {
             }
 
             post {
+
                 always {
 
                     junit(
@@ -139,6 +158,7 @@ pipeline {
          */
 
         stage('SonarQube Analysis') {
+
             steps {
 
                 dir("${SERVICE_DIR}") {
@@ -189,12 +209,22 @@ pipeline {
                 dir("${SERVICE_DIR}") {
 
                     sh '''
+                        set -e
+
+                        echo "========================================="
+                        echo "Trivy Filesystem Security Scan"
+                        echo "========================================="
+
                         trivy fs \
                           --scanners vuln,secret,misconfig \
                           --severity HIGH,CRITICAL \
                           --exit-code 1 \
                           --no-progress \
                           .
+
+                        echo "========================================="
+                        echo "Trivy Filesystem Scan PASSED"
+                        echo "========================================="
                     '''
                 }
             }
@@ -245,6 +275,84 @@ pipeline {
                         echo "Build Artifact Identified"
                         echo "========================================="
                         echo "JAR_FILE: ${env.JAR_FILE}"
+                        echo "========================================="
+                    }
+                }
+            }
+        }
+
+        /*
+         * ============================================================
+         * 8. Publish Exact Build Artifact To Nexus
+         * ============================================================
+         */
+
+        stage('Publish Artifact To Nexus') {
+
+            steps {
+
+                dir("${SERVICE_DIR}") {
+
+                    script {
+
+                        configFileProvider([
+                            configFile(
+                                fileId: "${MAVEN_SETTINGS_ID}",
+                                variable: 'MAVEN_SETTINGS'
+                            )
+                        ]) {
+
+                            sh '''
+                                set -e
+
+                                echo "========================================="
+                                echo "Nexus Artifact Publication"
+                                echo "========================================="
+
+                                echo "Service       : ${SERVICE_NAME}"
+                                echo "Group ID      : ${NEXUS_GROUP_ID}"
+                                echo "Artifact ID   : ${NEXUS_ARTIFACT_ID}"
+                                echo "Version       : ${APP_VERSION}"
+                                echo "Repository    : ${NEXUS_REPOSITORY}"
+                                echo "Artifact      : ${JAR_FILE}"
+
+                                echo "========================================="
+                                echo "Artifact Validation"
+                                echo "========================================="
+
+                                if [ ! -f "${JAR_FILE}" ]; then
+                                    echo "ERROR: Build artifact does not exist."
+                                    exit 1
+                                fi
+
+                                ls -lh "${JAR_FILE}"
+
+                                echo "========================================="
+                                echo "Artifact SHA256"
+                                echo "========================================="
+
+                                sha256sum "${JAR_FILE}"
+
+                                echo "========================================="
+                                echo "Publishing Existing Artifact To Nexus"
+                                echo "========================================="
+
+                                mvn \
+                                  --settings "${MAVEN_SETTINGS}" \
+                                  deploy:deploy-file \
+                                  -DgroupId="${NEXUS_GROUP_ID}" \
+                                  -DartifactId="${NEXUS_ARTIFACT_ID}" \
+                                  -Dversion="${APP_VERSION}" \
+                                  -Dpackaging=jar \
+                                  -Dfile="${JAR_FILE}" \
+                                  -DrepositoryId="${NEXUS_REPOSITORY}" \
+                                  -Durl="${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/"
+
+                                echo "========================================="
+                                echo "Nexus Publication Completed"
+                                echo "========================================="
+                            '''
+                        }
                     }
                 }
             }
@@ -261,12 +369,23 @@ pipeline {
 
         success {
 
-            echo "ShopSphere ${SERVICE_NAME} CI pipeline completed successfully."
+            echo "========================================="
+            echo "ShopSphere CI Pipeline SUCCESS"
+            echo "========================================="
+            echo "Service            : ${SERVICE_NAME}"
+            echo "Application Version: ${APP_VERSION}"
+            echo "Nexus Repository   : ${NEXUS_REPOSITORY}"
+            echo "Artifact           : ${JAR_FILE}"
+            echo "========================================="
         }
 
         failure {
 
-            echo "ShopSphere ${SERVICE_NAME} CI pipeline failed."
+            echo "========================================="
+            echo "ShopSphere CI Pipeline FAILED"
+            echo "========================================="
+            echo "Service: ${SERVICE_NAME}"
+            echo "========================================="
         }
 
         always {

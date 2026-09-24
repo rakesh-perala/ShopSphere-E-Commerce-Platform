@@ -20,7 +20,12 @@
 
     <name>user-service</name>
     <description>ShopSphere User Service</description>
-
+    <distributionManagement>
+        <snapshotRepository>
+            <id>shopshare</id>
+            <url>http://15.252.164.74:8081/repository/shopshare/</url>
+        </snapshotRepository>
+    </distributionManagement>
     <properties>
         <java.version>17</java.version>
 
