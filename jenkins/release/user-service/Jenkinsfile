@@ -1,0 +1,131 @@
+pipeline {
+
+    agent any
+
+    options {
+        disableConcurrentBuilds()
+        timestamps()
+
+        buildDiscarder(
+            logRotator(
+                numToKeepStr: '20'
+            )
+        )
+    }
+
+    parameters {
+
+        string(
+            name: 'CI_BUILD_NUMBER',
+            defaultValue: '',
+            description: 'Successful CI build number to promote'
+        )
+
+        string(
+            name: 'RELEASE_VERSION',
+            defaultValue: '',
+            description: 'Release version in MAJOR.MINOR.PATCH format, for example 1.0.0'
+        )
+
+        choice(
+            name: 'RELEASE_APPROVAL',
+            choices: [
+                'ABORT',
+                'PROCEED'
+            ],
+            description: 'Explicit release approval'
+        )
+    }
+
+    environment {
+
+        SERVICE_NAME = 'user-service'
+
+        SERVICE_DIR = 'application/services/user-service'
+
+        CI_JOB_NAME = 'ShopSphere-User-Service-CI'
+
+        AWS_REGION = 'ap-south-1'
+
+        DOCKER_BUILDKIT = '1'
+    }
+
+    stages {
+
+        stage('Validate Release Parameters') {
+
+            steps {
+
+                script {
+
+                    if (!params.CI_BUILD_NUMBER?.trim()) {
+                        error 'CI_BUILD_NUMBER is required.'
+                    }
+
+                    if (!(params.CI_BUILD_NUMBER ==~ /^[0-9]+$/)) {
+                        error 'CI_BUILD_NUMBER must contain only numbers.'
+                    }
+
+                    if (!params.RELEASE_VERSION?.trim()) {
+                        error 'RELEASE_VERSION is required.'
+                    }
+
+                    if (!(params.RELEASE_VERSION ==~ /^[0-9]+\.[0-9]+\.[0-9]+$/)) {
+                        error 'RELEASE_VERSION must use MAJOR.MINOR.PATCH format.'
+                    }
+
+                    if (params.RELEASE_APPROVAL != 'PROCEED') {
+                        error 'Release approval was not granted.'
+                    }
+
+                    echo "Service: ${SERVICE_NAME}"
+                    echo "CI Job: ${CI_JOB_NAME}"
+                    echo "CI Build Number: ${params.CI_BUILD_NUMBER}"
+                    echo "Release Version: ${params.RELEASE_VERSION}"
+                    echo "AWS Region: ${AWS_REGION}"
+                }
+            }
+        }
+
+        stage('Release Preparation') {
+
+            steps {
+
+                sh '''
+                    set -e
+
+                    echo "========================================="
+                    echo "Release Preparation"
+                    echo "========================================="
+
+                    echo "Workspace:"
+                    pwd
+
+                    echo "Java Version:"
+                    java -version || true
+
+                    echo "Docker Version:"
+                    docker --version || true
+
+                    echo "AWS CLI Version:"
+                    aws --version || true
+
+                    echo "Release pipeline skeleton validated."
+                '''
+            }
+        }
+    }
+
+    post {
+
+        success {
+
+            echo 'ECOM-010 release pipeline skeleton validation completed successfully.'
+        }
+
+        failure {
+
+            echo 'ECOM-010 release pipeline skeleton validation failed.'
+        }
+    }
+}
