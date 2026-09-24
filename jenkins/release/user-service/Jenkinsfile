@@ -154,6 +154,7 @@ pipeline {
                      */
 
                     env.NEXUS_GROUP_PATH =
+env.NEXUS_SNAPSHOT_VERSION_VALUE = params.NEXUS_SNAPSHOT_VERSION
                         env.NEXUS_GROUP_ID.replace('.', '/')
 
                     env.NEXUS_METADATA_URL =
@@ -279,7 +280,7 @@ PY
 
                         JAR_NAME="${NEXUS_ARTIFACT_ID}-${NEXUS_RESOLVED_VERSION}.jar"
 
-                        ARTIFACT_URL="${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/${NEXUS_GROUP_PATH}/${NEXUS_ARTIFACT_ID}/${NEXUS_SNAPSHOT_VERSION}/${JAR_NAME}"
+                        ARTIFACT_URL="${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/${NEXUS_GROUP_PATH}/${NEXUS_ARTIFACT_ID}/${NEXUS_SNAPSHOT_VERSION_VALUE}/${JAR_NAME}"
 
                         echo
                         echo "============================================"
